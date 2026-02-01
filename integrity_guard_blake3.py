@@ -245,5 +245,15 @@ if __name__ == "__main__":
 
     if cmd == "snapshot":
         create_snapshot()
+
     elif cmd == "verify":
-        verify_latest()
+        # Bucle infinito cada 1 min
+        print("Verificación automática cada minuto. Presiona Ctrl+C para parar.")
+        try:
+            while True:
+                print("\n⏱ Comenzando verificación...")
+                verify_latest()
+                print("✅ Esperando 1 minuto para la siguiente verificación...\n")
+                time.sleep(60)
+        except KeyboardInterrupt:
+            print("\n🛑 Verificación interrumpida por el usuario")
