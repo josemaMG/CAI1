@@ -9,14 +9,14 @@ from concurrent.futures import ThreadPoolExecutor
 import blake3
 
 # ======================================================
-# CONFIGURACIÓN
+# Configuración
 # ======================================================
 
 DATA_DIR = "X:/cloudA"          # nube principal (Drive montado)
 VAULT_DIR = "X:/vault"         # copia confiable
 MANIFEST_DIR = "./manifests"
 
-CHUNK_SIZE = 4 * 1024 * 1024   # 4 MiB (óptimo)
+CHUNK_SIZE = 4 * 1024 * 1024   # 4 MiB (óptimo encontrado)
 THREADS = 8                   # paralelismo
 
 PRIVATE_KEY = "./integrity/sign_key.pem"
@@ -28,7 +28,7 @@ USE_PKCS11 = False
 
 
 # =============================
-# HASH BLAKE3
+# Hash mediante blake3
 # =============================
 
 def blake3_hex(data: bytes) -> str:
@@ -49,7 +49,7 @@ def hash_file_chunks(path):
 
 
 # =============================
-# MERKLE TREE (BLAKE3)
+# Creación del Árbol Merkle mediante BLAKE3
 # =============================
 
 def merkle_root(hashes):
@@ -74,7 +74,7 @@ def merkle_root(hashes):
 
 
 # =============================
-# BUILD MANIFEST
+# Creación del Manifest
 # =============================
 
 def hash_single_file(rel_path):
@@ -121,7 +121,7 @@ def build_manifest():
 
 
 # =============================
-# FIRMA (OpenSSL)
+# Firma mediante OpenSSL
 # =============================
 
 def sign_manifest(path):
@@ -143,7 +143,7 @@ def verify_signature(path):
 
 
 # =============================
-# VAULT COPY
+# Copia hacia Vault
 # =============================
 
 def sync_to_vault():
@@ -152,7 +152,7 @@ def sync_to_vault():
 
 
 # =============================
-# VERIFICACIÓN
+# Verificación y Rollback
 # =============================
 
 def rollback(rel_path):
@@ -172,7 +172,7 @@ def verify_file(file_info):
     root = merkle_root(chunks)
 
     if root != file_info["root"]:
-        print(f"❌ Corrupción detectada: {rel}")
+        print(f"Corrupción detectada: {rel}")
         rollback(rel)
         return False
 
@@ -189,7 +189,7 @@ def verify_manifest(manifest):
 
 
 # =============================
-# SNAPSHOT
+# Snapshot
 # =============================
 
 def create_snapshot():
@@ -206,11 +206,11 @@ def create_snapshot():
     sign_manifest(path)
     sync_to_vault()
 
-    print("✅ Snapshot creado:", path)
+    print("Snapshot creado:", path)
 
 
 # =============================
-# VERIFY
+# Verificación
 # =============================
 
 def verify_latest():
@@ -225,13 +225,13 @@ def verify_latest():
     ok = verify_manifest(manifest)
 
     if ok:
-        print("✅ Integridad OK")
+        print("Integridad OK")
     else:
-        print("⚠ Rollback ejecutado")
+        print("Rollback ejecutado")
 
 
 # =============================
-# CLI
+# Terminal
 # =============================
 
 if __name__ == "__main__":
@@ -248,12 +248,12 @@ if __name__ == "__main__":
 
     elif cmd == "verify":
         # Bucle infinito cada 1 min
-        print("Verificación automática cada minuto. Presiona Ctrl+C para parar.")
+        print("Verificacion automatica cada minuto. Presiona Ctrl+C para parar.")
         try:
             while True:
-                print("\n⏱ Comenzando verificación...")
+                print("\nComenzando verificacion...")
                 verify_latest()
-                print("✅ Esperando 1 minuto para la siguiente verificación...\n")
+                print("Esperando 1 minuto para la siguiente verificacion...\n")
                 time.sleep(60)
         except KeyboardInterrupt:
-            print("\n🛑 Verificación interrumpida por el usuario")
+            print("\nVerificacion interrumpida por el usuario")

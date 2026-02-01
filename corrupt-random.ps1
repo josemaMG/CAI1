@@ -26,5 +26,5 @@ $fs.WriteByte($value)
 
 $fs.Close()
 
-Write-Host "Byte modificado en posición $pos con valor $value"
-Write-Host "Corrupción aleatoria completada ✅"
+Write-Host "Byte modificado en posicion $pos con valor $value"
+Write-Host "Corrupcion aleatoria completada."

@@ -27,4 +27,4 @@ foreach ($file in $files) {
     Write-Host "Corrompido $($file.Name) en byte $pos"
 }
 
-Write-Host "Corrupción masiva completada ✅"
+Write-Host "Corrupcion masiva completada."
