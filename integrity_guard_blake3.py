@@ -141,17 +141,24 @@ def verify_file(info):
 
     if not os.path.exists(full):
         print(f"Archivo faltante en local: {rel}")
+        # Reporta como faltante, pero también restaura después
+        missing = True
+        result = False
+    else:
+        missing = False
+        result = True
+
+    if not missing:
+        current_data = hash_file_with_metadata(rel, DATA_DIR)
+        if current_data["root"] != info["root"]:
+            print(f"Archivo corrupto detectado: {rel}")
+            result = False
+            # Restaurar archivo corrupto
+            rollback(rel)
+    else:
+        # Restaurar archivo faltante
         rollback(rel)
-        return False
-
-    current_data = hash_file_with_metadata(rel, DATA_DIR)
-
-    if current_data["root"] != info["root"]:
-        print(f"Archivo corrupto detectado: {rel}")
-        rollback(rel)
-        return False
-
-    return True
+    return result
 
 
 def verify_manifest(manifest):
@@ -183,8 +190,8 @@ def verify_manifest(manifest):
 # ======================================================
 
 def download_from_drive():
-    print("Descargando desde Drive...")
-    cmd = ["rclone", "copy", REMOTE, DATA_DIR] + RCLONE_BASE_FLAGS
+    print("Sincronizando desde Drive...")
+    cmd = ["rclone", "sync", REMOTE, DATA_DIR] + RCLONE_BASE_FLAGS
     subprocess.run(cmd, check=True)
 
 
