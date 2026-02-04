@@ -3,7 +3,7 @@
 # Corrompe 1 archivo .bin aleatorio
 # ==========================================
 
-$dir = "X:\cloudA"
+$dir = "X:"
 
 $files = Get-ChildItem $dir -Filter *.bin
 

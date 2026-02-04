@@ -3,7 +3,7 @@
 # Corrompe TODOS los .bin
 # ==========================================
 
-$dir = "X:\cloudA"
+$dir = "X:"
 
 $files = Get-ChildItem $dir -Filter *.bin
 

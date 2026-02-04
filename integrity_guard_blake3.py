@@ -11,24 +11,39 @@ import blake3
 # Configuración
 # ======================================================
 
-DATA_DIR = "X:/cloudA"          # nube principal (Drive montado)
-VAULT_DIR = "X:/vault"         # copia confiable
+DATA_DIR = "C:/cloudA" # Directorio local de los 15 gb sincronizados
+
+VAULT_DIR = "C:/vault" # Directorio local de la copia de los 15 gb
+
 MANIFEST_DIR = "./manifests"
 
-CHUNK_SIZE = 4 * 1024 * 1024   # 4 MiB (óptimo encontrado)
-THREADS = 8                   # paralelismo
+REMOTE = "gdrive:cloudA" # Remoto rclone (Drive) NO CAMBIAR
+
+CHUNK_SIZE = 4 * 1024 * 1024
+THREADS = 8
 
 PRIVATE_KEY = "./integrity/sign_key.pem"
 PUBLIC_KEY  = "./integrity/sign_pub.pem"
 
-USE_PKCS11 = False
-
+# ======================================================
+# rclone optimizado
 # ======================================================
 
+RCLONE_BASE_FLAGS = [
+    "--fast-list",
+    "--transfers", "3",
+    "--checkers", "32",
+    "--drive-chunk-size", "256M",
+    "--multi-thread-streams", "12",
+    "--buffer-size", "256M",
+    "--use-mmap",
+    "--progress"
+]
 
-# =============================
-# Hash mediante blake3
-# =============================
+
+# ======================================================
+# Hash BLAKE3
+# ======================================================
 
 def blake3_hex(data: bytes) -> str:
     return blake3.blake3(data).hexdigest()
@@ -36,20 +51,17 @@ def blake3_hex(data: bytes) -> str:
 
 def hash_file_chunks(path):
     hashes = []
-
     with open(path, "rb") as f:
         while True:
             chunk = f.read(CHUNK_SIZE)
             if not chunk:
                 break
             hashes.append(blake3_hex(chunk))
-
     return hashes
 
-
-# =============================
-# Creación del Árbol Merkle mediante BLAKE3
-# =============================
+# ======================================================
+# Árbol Merkle
+# ======================================================
 
 def merkle_root(hashes):
     if not hashes:
@@ -61,67 +73,57 @@ def merkle_root(hashes):
         if len(nodes) % 2 == 1:
             nodes.append(nodes[-1])
 
-        new_level = []
-
+        new = []
         for i in range(0, len(nodes), 2):
-            combined = (nodes[i] + nodes[i+1]).encode()
-            new_level.append(blake3_hex(combined))
-
-        nodes = new_level
+            new.append(blake3_hex((nodes[i] + nodes[i+1]).encode()))
+        nodes = new
 
     return nodes[0]
 
+# ======================================================
+# Manifest
+# ======================================================
 
-# =============================
-# Creación del Manifest
-# =============================
-
-def hash_single_file(rel_path):
+def hash_file_with_metadata(rel_path):
     full_path = os.path.join(DATA_DIR, rel_path)
 
-    size = os.path.getsize(full_path)
     chunks = hash_file_chunks(full_path)
-    root = merkle_root(chunks)
+    stat = os.stat(full_path)
+
+    metadata = (
+        rel_path.encode() +
+        str(stat.st_size).encode() +
+        str(int(stat.st_mtime)).encode()
+    )
+
+    combined = [blake3_hex(c.encode() + metadata) for c in chunks]
+    root = merkle_root(combined)
 
     return {
         "path": rel_path,
-        "size": size,
-        "chunks": chunks,
         "root": root
     }
 
 
 def build_manifest():
-    print("Generando hashes BLAKE3...")
-
-    files = []
-
     rel_paths = []
 
-    for root, _, filenames in os.walk(DATA_DIR):
-        for f in filenames:
+    for root, _, files in os.walk(DATA_DIR):
+        for f in files:
             full = os.path.join(root, f)
-            rel = os.path.relpath(full, DATA_DIR)
-            rel_paths.append(rel)
+            rel_paths.append(os.path.relpath(full, DATA_DIR))
 
     with ThreadPoolExecutor(max_workers=THREADS) as ex:
-        files = list(ex.map(hash_single_file, rel_paths))
+        files = list(ex.map(hash_file_with_metadata, rel_paths))
 
-    manifest = {
+    return {
         "timestamp": int(time.time()),
-        "algorithm": "BLAKE3",
-        "chunk_size": CHUNK_SIZE,
         "files": files
     }
 
-    manifest["snapshot_root"] = merkle_root([f["root"] for f in files])
-
-    return manifest
-
-
-# =============================
-# Firma mediante OpenSSL
-# =============================
+# ======================================================
+# OpenSSL
+# ======================================================
 
 def sign_manifest(path):
     subprocess.run([
@@ -140,38 +142,42 @@ def verify_signature(path):
         path
     ], check=True)
 
-
-# =============================
-# Copia hacia Vault
-# =============================
+# ======================================================
+# Vault
+# ======================================================
 
 def sync_to_vault():
-    print("Sincronizando Vault...")
+    print("Actualizando Vault local...")
     shutil.copytree(DATA_DIR, VAULT_DIR, dirs_exist_ok=True)
 
+# ======================================================
+# Rollback
+# ======================================================
 
-# =============================
-# Verificación y Rollback
-# =============================
+def rollback(rel):
+    src = os.path.join(VAULT_DIR, rel)
+    dst = os.path.join(DATA_DIR, rel)
 
-def rollback(rel_path):
-    src = os.path.join(VAULT_DIR, rel_path)
-    dst = os.path.join(DATA_DIR, rel_path)
-
-    print(f"Restaurando {rel_path}")
     os.makedirs(os.path.dirname(dst), exist_ok=True)
     shutil.copy2(src, dst)
+    print(f"Restaurado {rel}")
 
+# ======================================================
+# Verificación de archivos
+# ======================================================
 
-def verify_file(file_info):
-    rel = file_info["path"]
+def verify_file(info):
+    rel = info["path"]
     full = os.path.join(DATA_DIR, rel)
+
+    if not os.path.exists(full):
+        rollback(rel)
+        return False
 
     chunks = hash_file_chunks(full)
     root = merkle_root(chunks)
 
-    if root != file_info["root"]:
-        print(f"Corrupción detectada: {rel}")
+    if root != info["root"]:
         rollback(rel)
         return False
 
@@ -179,17 +185,33 @@ def verify_file(file_info):
 
 
 def verify_manifest(manifest):
-    print("Verificando integridad...")
-
     with ThreadPoolExecutor(max_workers=THREADS) as ex:
         results = list(ex.map(verify_file, manifest["files"]))
 
     return all(results)
 
+# ======================================================
+# rclone Download/upload
+# ======================================================
 
-# =============================
+def rclone_copy(src, dst):
+    cmd = ["rclone", "copy", src, dst] + RCLONE_BASE_FLAGS
+
+    subprocess.run(cmd, check=True)
+
+
+def download_from_drive():
+    print("Descargando desde Drive...")
+    rclone_copy(REMOTE, DATA_DIR)
+
+
+def upload_to_drive():
+    print("Subiendo a Drive...")
+    rclone_copy(DATA_DIR, REMOTE)
+
+# ======================================================
 # Snapshot
-# =============================
+# ======================================================
 
 def create_snapshot():
     Path(MANIFEST_DIR).mkdir(exist_ok=True)
@@ -205,15 +227,22 @@ def create_snapshot():
     sign_manifest(path)
     sync_to_vault()
 
-    print("Snapshot creado:", path)
+    print("Snapshot creado")
 
+# ======================================================
+# Ciclo completo
+# ======================================================
 
-# =============================
-# Verificación
-# =============================
+def full_cycle():
+    download_from_drive()
 
-def verify_latest():
     files = sorted(Path(MANIFEST_DIR).glob("manifest_*.json"))
+    if not files:
+        print("No hay manifest, creando snapshot inicial")
+        create_snapshot()
+        upload_to_drive()
+        return
+
     latest = str(files[-1])
 
     verify_signature(latest)
@@ -224,14 +253,15 @@ def verify_latest():
     ok = verify_manifest(manifest)
 
     if ok:
-        print("Integridad OK")
+        print("Integridad OK ✓")
+        upload_to_drive()
     else:
-        print("Rollback ejecutado")
+        print("Se corrigieron archivos -> subiendo versión sana")
+        upload_to_drive()
 
-
-# =============================
-# Terminal
-# =============================
+# ======================================================
+# Main
+# ======================================================
 
 if __name__ == "__main__":
     import sys
@@ -246,13 +276,10 @@ if __name__ == "__main__":
         create_snapshot()
 
     elif cmd == "verify":
-        # Bucle infinito cada 1 min
-        print("Verificacion automatica cada minuto. Presiona Ctrl+C para parar.")
+        print("Verificando cada 60s (Drive -> Local -> Vault)")
         try:
             while True:
-                print("\nComenzando verificacion...")
-                verify_latest()
-                print("Esperando 1 minuto para la siguiente verificacion...\n")
+                full_cycle()
                 time.sleep(60)
         except KeyboardInterrupt:
-            print("\nVerificacion interrumpida por el usuario")
+            print("Finalizado")
